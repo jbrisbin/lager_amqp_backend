@@ -1,0 +1,11 @@
+{application, lager_amqp_backend, [
+  {description, "Lager AMQP Logging Backend"},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [
+    kernel,
+    stdlib,
+    lager
+  ]},
+  {env, []}
+]}.

@@ -1,0 +1,10 @@
+// You need the RabbitMQ DSL to run this test file:
+// https://github.com/jbrisbin/rabbitmq-dsl
+mq.exchange(name: "lager_amqp_backend", type: "topic") {
+	queue(name: null, routingKey: "#") {
+    consume { msg ->
+      println new String(msg.body)
+      return true
+    }
+  }
+}
