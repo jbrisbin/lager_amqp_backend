@@ -5,7 +5,7 @@ This is a backend for the Lager Erlang logging framework.
 [https://github.com/basho/lager](https://github.com/basho/lager)
 
 It will send all of your logging messages to the exchange you specify and use the logging level 
-as the routing key. It will do smart connection pool to your broker. If the connection drops or 
+as the routing key. It uses a smart connection pool to your broker. If the connection drops or 
 becomes unusable, the backend will reconnect.
 
 ### Usage
