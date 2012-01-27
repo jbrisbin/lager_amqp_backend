@@ -2,3 +2,6 @@
 deps
 ebin
 log
+.eunit
+.project
+.settings

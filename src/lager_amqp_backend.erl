@@ -18,6 +18,12 @@
 -behaviour(gen_event).
 
 -include_lib("amqp_client/include/amqp_client.hrl").
+-include_lib("lager/include/lager.hrl").
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 
 -export([
   init/1, 
@@ -33,7 +39,10 @@
   name,
   level,
   exchange,
-  params
+  params,
+  formatter,
+  format_config,
+  content_type
 }).
 
 init(Params) ->
@@ -41,6 +50,9 @@ init(Params) ->
   Name = config_val(name, Params, ?MODULE),  
   Level = config_val(level, Params, debug),
   Exchange = config_val(exchange, Params, list_to_binary(atom_to_list(?MODULE))),
+  ContentType = config_val(content_type,Params,<<"text/plain">>),
+  Formatter = config_val(formatter,Params,lager_default_formatter),
+  FormatConfig = config_val(format_config,Params,[date, " ", time, " ", message]),
   
   AmqpParams = #amqp_params_network {
     username       = config_val(amqp_user, Params, <<"guest">>),
@@ -57,7 +69,10 @@ init(Params) ->
     name = Name, 
     level = Level, 
     exchange = Exchange,
-    params = AmqpParams
+    params = AmqpParams,
+	formatter = Formatter,
+	format_config = FormatConfig,
+	content_type=ContentType
   }}.
 
 handle_call({set_loglevel, Level}, #state{ name = _Name } = State) ->
@@ -70,26 +85,19 @@ handle_call(get_loglevel, #state{ level = Level } = State) ->
 handle_call(_Request, State) ->
   {ok, ok, State}.
 
-handle_event({log, Dest, Level, {Date, Time}, Message}, #state{ name = Name, level = L, params = AmqpParams } = State) when Level > L ->
-  case lists:member({lager_amqp_backend, Name}, Dest) of
+handle_event(#lager_log_message{}=Msg, #state{ name = Name, level = L, params = AmqpParams } = State) ->
+  case lager_backend_utils:is_loggable(Msg, L, {lager_amqp_backend, Name}) of
     true ->
       case amqp_channel(AmqpParams) of
         {ok, Channel} ->
-          {ok, send(State, Level, [Date, " ", Time, " ", Message], Channel)};
+          {ok, send(State, Msg, Channel)};
         _ -> 
           {ok, State}
       end;
     false ->
       {ok, State}
   end;
-  
-handle_event({log, Level, {Date, Time}, Message}, #state{ level = L, params = AmqpParams } = State) when Level =< L->
-  case amqp_channel(AmqpParams) of
-    {ok, Channel} ->
-      {ok, send(State, Level, [Date, " ", Time, " ", Message], Channel)};
-    _ -> 
-      {ok, State}
-  end;
+
   
 handle_event(_Event, State) ->
   {ok, State}.
@@ -103,12 +111,12 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
   
-send(#state{ exchange = Exchange } = State, Level, Message, Channel) ->
+send(#state{ exchange = Exchange,formatter=Formatter } = State, #lager_log_message{severity_as_int=Level}=Message, Channel) ->
 
   RoutingKey = list_to_binary(atom_to_list(lager_util:num_to_level(Level))),
   Publish = #'basic.publish'{ exchange = Exchange, routing_key = RoutingKey },
-  Props = #'P_basic'{ content_type = <<"text/plain">> },
-  Body = list_to_binary(lists:flatten(Message)),
+  Props = #'P_basic'{ content_type = State#state.content_type },
+  Body = iolist_to_binary(Formatter:format(Message,State#state.format_config)),
   Msg = #amqp_msg{ payload = Body, props = Props },
 
   % io:format("message: ~p~n", [Msg]),
@@ -156,4 +164,58 @@ test() ->
   lager:log(info, self(), "Test INFO message"),
   lager:log(debug, self(), "Test DEBUG message"),
   lager:log(error, self(), "Test ERROR message").
-  
+
+-ifdef(TEST).
+
+-define(MESSAGE_TEXT,"Test Message").
+-define(TEST_MESSAGE(Level,Destinations),
+		#lager_log_message{
+						   destinations=Destinations,
+						   metadata=[],
+						   severity_as_int=Level,
+						   timestamp=lager_util:format_time(),
+						   message= ?MESSAGE_TEXT}).
+
+-define(TEST_STATE(Level),#state{name=name,format_config=[message],formatter=lager_default_formatter,level=Level,content_type= <<"text/plain">>}).
+calls_syslog_test_() ->
+	{foreach, fun() -> erlymock:start(),
+					   erlymock:stub(pg2,get_closest_pid,['_'],[{return,channel_name}]),
+					   erlymock:o_o(amqp_channel,cast,fun(channel_name,
+													  #'basic.publish'{ routing_key = <<"info">> },
+													  #amqp_msg{ payload = <<"Test Message">>}
+														  ) -> true end
+								    ),
+					   erlymock:replay()
+	 end,
+	 fun(_) -> ok end,
+	 [{"Test normal logging" ,
+	   fun() ->
+			   ?MODULE:handle_event(?TEST_MESSAGE(?INFO,[]), ?TEST_STATE(?INFO)),
+			   % make sure that syslog:log was called with the test message
+			   erlymock:verify()
+	   end
+	  },
+	  {"Test logging by direct destination",
+	   fun() ->
+			   ?MODULE:handle_event(?TEST_MESSAGE(?INFO,[{?MODULE,name}]), ?TEST_STATE(?ERROR)),
+			   % make sure that syslog:log was called with the test message
+			   erlymock:verify()
+	   end
+	  }
+	 ]}.
+
+should_not_log_test_() ->
+	{foreach, fun() -> erlymock:start(),
+					   erlymock:stub(amqp_channel,cast,['_','_','_'], [{throw,should_not_be_called}]),
+					   erlymock:replay()
+	 end,
+	 fun(_) -> ok end,
+	 [{"Rejects based upon severity threshold" ,
+	   fun() ->
+			   ?MODULE:handle_event(?TEST_MESSAGE(?DEBUG,[]), ?TEST_STATE(?INFO)),
+			   erlymock:verify()
+	   end
+	  }
+	 ]}.
+
+-endif.
