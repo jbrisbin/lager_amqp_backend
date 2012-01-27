@@ -28,7 +28,10 @@ You can pass the backend the following configuration (shown are the defaults):
           {amqp_pass,   <<"guest">>},
           {amqp_vhost,  <<"/">>},
           {amqp_host,   "localhost"},
-          {amqp_port,   5672}
+          {amqp_port,   5672},
+          {formatter, lager_default_formatter},  % optional, this is the default
+          {format_config, [date," ",time," ", message]}, % optional, this is the default
+          {content_type, <<"text/plain">>} % optional, this is the default
         ]}
       ]}
     ]}
