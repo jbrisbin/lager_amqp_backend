@@ -102,13 +102,14 @@ log(Level, Date, Time, Message, #state{params = AmqpParams } = State) ->
   end.
   
 send(#state{ name = Name, exchange = Exchange } = State, Level, Message, Channel) ->
-  RkPrefix = list_to_binary(atom_to_list(lager_util:num_to_level(Level))),
-  RoutingKey =  case Name of
-                  [] ->
-                    RkPrefix;
-                  Name ->
-                    string:join([RkPrefix, Name], ".")
-                end,
+  RkPrefix = atom_to_list(lager_util:num_to_level(Level)),
+  RoutingKey =  list_to_binary( case Name of
+                                  [] ->
+                                    RkPrefix;
+                                  Name ->
+                                    string:join([RkPrefix, Name], ".")
+                                end
+                              ),
   Publish = #'basic.publish'{ exchange = Exchange, routing_key = RoutingKey },
   Props = #'P_basic'{ content_type = <<"text/plain">> },
   Body = list_to_binary(lists:flatten(Message)),
