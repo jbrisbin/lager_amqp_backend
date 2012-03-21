@@ -73,13 +73,13 @@ handle_call(_Request, State) ->
 handle_event({log, Dest, Level, {Date, Time}, Message}, #state{ name = Name, level = L} = State) when Level > L ->
   case lists:member({lager_amqp_backend, Name}, Dest) of
     true ->
-      log(Level, Date, Time, Message, State);
+      {ok, log(Level, Date, Time, Message, State)};
     false ->
       {ok, State}
   end;
 
 handle_event({log, Level, {Date, Time}, Message}, #state{ level = L } = State) when Level =< L->
-  log(Level, Date, Time, Message, State);
+  {ok, log(Level, Date, Time, Message, State)};
   
 handle_event(_Event, State) ->
   {ok, State}.
@@ -98,9 +98,9 @@ log(Level, Date, Time, Message, #state{params = AmqpParams } = State) ->
     {ok, Channel} ->
       send(State, Level, [Date, " ", Time, " ", Message], Channel);
     _ ->
-      do_nothing
+      State
   end.
-  
+
 send(#state{ name = Name, exchange = Exchange } = State, Level, Message, Channel) ->
   RkPrefix = atom_to_list(lager_util:num_to_level(Level)),
   RoutingKey =  list_to_binary( case Name of
