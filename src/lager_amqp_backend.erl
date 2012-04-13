@@ -127,29 +127,30 @@ config_val(C, Params, Default) ->
   end.
 
 amqp_channel(AmqpParams) ->
-  % io:format("amqp params: ~p~n", [AmqpParams]),
-  case pg2:get_closest_pid(AmqpParams) of
-    {error, {no_such_group, _}} -> 
-      pg2:create(AmqpParams),
-      amqp_channel(AmqpParams);
-    {error, {no_process, _}} -> 
-      % io:format("no client running~n"),
-      case amqp_connection:start(AmqpParams) of
-        {ok, Client} ->
-          % io:format("started new client: ~p~n", [Client]),
-          case amqp_connection:open_channel(Client) of
-            {ok, Channel} ->
-              pg2:join(AmqpParams, Channel),
-              {ok, Channel};
-            {error, Reason} -> {error, Reason}
-          end;
-        {error, Reason} -> 
-          % io:format("encountered an error: ~p~n", [Reason]),
-          {error, Reason}
+  case maybe_new_pid({AmqpParams, connection},
+                     fun() -> amqp_connection:start(AmqpParams) end) of
+    {ok, Client} ->
+      maybe_new_pid({AmqpParams, channel},
+                    fun() -> amqp_connection:open_channel(Client) end);
+    Error ->
+      Error
+  end.
+
+maybe_new_pid(Group, StartFun) ->
+  case pg2:get_closest_pid(Group) of
+    {error, {no_such_group, _}} ->
+      pg2:create(Group),
+      maybe_new_pid(Group, StartFun);
+    {error, {no_process, _}} ->
+      case StartFun() of
+        {ok, Pid} ->
+          pg2:join(Group, Pid),
+          {ok, Pid};
+        Error ->
+          Error
       end;
-    Channel -> 
-      % io:format("using existing channel: ~p~n", [Channel]),
-      {ok, Channel}
+    Pid ->
+      {ok, Pid}
   end.
   
 test() ->
